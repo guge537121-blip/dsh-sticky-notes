@@ -1,0 +1,42 @@
+{
+  "name": "dsh-sticky-notes",
+  "version": "0.1.0",
+  "description": "DSH Desktop 本地随手便签插件",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ]
+    }
+  },
+  "scripts": {
+    "prepare": "node -e \"process.exit(0)\"",
+    "build": "node -e \"process.exit(0)\"",
+    "check": "node test/check.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "sticky-notes"
+  ],
+  "license": "MIT"
+}
