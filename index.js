@@ -43,7 +43,8 @@ function normalizeNote(value) {
   if (!id || !createdAt || !updatedAt) return null
   if (!isIsoDate(createdAt) || !isIsoDate(updatedAt)) return null
   if (content.length > MAX_CONTENT_LENGTH) return null
-  return { id, content, createdAt, updatedAt }
+  const pinned = value.pinned === true
+  return { id, content, createdAt, updatedAt, pinned }
 }
 
 function normalizeDocument(value) {
@@ -109,11 +110,25 @@ async function atomicWrite(file, document) {
   await rename(temp, file)
 }
 
-function sortNotes(notes) {
+function sortNotes(notes, sortBy) {
   return [...notes].sort((a, b) => {
-    const aa = Date.parse(a.updatedAt)
-    const bb = Date.parse(b.updatedAt)
-    return bb - aa
+    // 置顶优先
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+
+    if (sortBy === 'oldest') {
+      return Date.parse(a.updatedAt) - Date.parse(b.updatedAt)
+    } else if (sortBy === 'title') {
+      const ta = (a.content.split('\n')[0] || '').trim().toLocaleLowerCase()
+      const tb = (b.content.split('\n')[0] || '').trim().toLocaleLowerCase()
+      return ta.localeCompare(tb)
+    } else if (sortBy === 'title-desc') {
+      const ta = (a.content.split('\n')[0] || '').trim().toLocaleLowerCase()
+      const tb = (b.content.split('\n')[0] || '').trim().toLocaleLowerCase()
+      return tb.localeCompare(ta)
+    }
+    // 默认：最新优先
+    return Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
   })
 }
 
@@ -140,11 +155,6 @@ function setJson(res, status, payload) {
     'cache-control': 'no-store',
   })
   res.end(JSON.stringify(payload))
-}
-
-function setNoContent(res) {
-  res.writeHead(204)
-  res.end()
 }
 
 async function readJsonBody(req) {
@@ -191,7 +201,8 @@ export function apply(ctx) {
   async function listNotes(url) {
     const document = await loadDocument()
     const filtered = searchNotes(document.notes, url.searchParams.get('query') ?? '')
-    const sorted = sortNotes(filtered)
+    const sortBy = url.searchParams.get('sort') ?? 'newest'
+    const sorted = sortNotes(filtered, sortBy)
     const page = parsePage(url.searchParams.get('page'))
     const pageSize = parsePageSize(url.searchParams.get('pageSize'))
     const total = sorted.length
@@ -226,13 +237,14 @@ export function apply(ctx) {
       content: value,
       createdAt: now,
       updatedAt: now,
+      pinned: false,
     }
     document.notes.push(note)
     await persist(document)
     return note
   }
 
-  async function updateNote(id, content) {
+  async function updateNote(id, content, pinned) {
     const value = validateContent(content)
     const document = await loadDocument()
     const index = document.notes.findIndex(note => note.id === id)
@@ -243,6 +255,24 @@ export function apply(ctx) {
     const note = {
       ...previous,
       content: value,
+      updatedAt: new Date().toISOString(),
+      pinned: typeof pinned === 'boolean' ? pinned : previous.pinned,
+    }
+    document.notes[index] = note
+    await persist(document)
+    return note
+  }
+
+  async function togglePin(id) {
+    const document = await loadDocument()
+    const index = document.notes.findIndex(note => note.id === id)
+    if (index < 0) {
+      throw Object.assign(new Error('note not found'), { statusCode: 404 })
+    }
+    const previous = document.notes[index]
+    const note = {
+      ...previous,
+      pinned: !previous.pinned,
       updatedAt: new Date().toISOString(),
     }
     document.notes[index] = note
@@ -291,7 +321,12 @@ export function apply(ctx) {
 
         if (method === 'PUT' && parts[0] === 'update' && parts[1]) {
           const body = await readJsonBody(req)
-          setJson(res, 200, await updateNote(parts[1], body.content))
+          setJson(res, 200, await updateNote(parts[1], body.content, body.pinned))
+          return
+        }
+
+        if (method === 'POST' && parts[0] === 'pin' && parts[1]) {
+          setJson(res, 200, await togglePin(parts[1]))
           return
         }
 
